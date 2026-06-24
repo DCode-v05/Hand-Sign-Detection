@@ -1,118 +1,156 @@
-# Hand Sign Prediction
+# Hand Sign Detection
 
-## Project Description
-This project takes an image of a hand sign as input and predicts the corresponding American Sign Language (ASL) character. It utilizes a Convolutional Neural Network (CNN) trained on a dataset of ASL signs (digits 0-9 and letters a-z). The solution is deployed as an interactive web application using Streamlit, allowing users to upload images and receive real-time predictions with confidence scores.
+**Upload a photo of an American Sign Language hand sign and get back the character it spells — all 36 of them, with a confidence score.**
 
----
+![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![TensorFlow](https://img.shields.io/badge/TensorFlow-FF6F00?style=flat&logo=tensorflow&logoColor=white) ![Keras](https://img.shields.io/badge/Keras-D00000?style=flat&logo=keras&logoColor=white) ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat&logo=streamlit&logoColor=white) ![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat&logo=numpy&logoColor=white) ![Jupyter](https://img.shields.io/badge/Jupyter-F37626?style=flat&logo=jupyter&logoColor=white)
 
-## Project Details
+## Overview
 
-### Problem Statement
-Sign language is the primary mode of communication for the deaf and hard-of-hearing community. Automating the recognition of sign language characters can bridge communication gaps and serve as an educational tool for learning ASL.
+This project recognizes American Sign Language (ASL) hand signs from a single image. It covers 36 classes — the digits 0–9 and the letters a–z — and returns the predicted character along with how confident the model is.
 
-### Data Preprocessing
-- **Image Resizing:** All input images are resized to a fixed dimension of 64x64 pixels.
-- **Normalization:** Pixel values are normalized to the range [0, 1] by dividing by 255.0.
-- **Data Structure:** The dataset is organized into subdirectories for each class (0-9, a-z).
+The whole thing is two parts. A Jupyter notebook trains a neural network on a folder of cropped hand-sign photos, and a small Streamlit app loads the saved model so anyone can drag in an image and see a prediction. I built it as a computer-vision warm-up — the goal was to take a labelled image dataset end to end: load it, preprocess it, train a classifier, plot how training went, save the model, and put a usable web front-end on top of it.
 
-### Model Architecture
-- **Type:** Convolutional Neural Network (CNN)
-- **Framework:** TensorFlow / Keras
-- **Layers:**
-  - Convolutional Layers (Conv2D) for feature extraction.
-  - Max Pooling Layers (MaxPooling2D) for down-sampling.
-  - Flatten Layer to convert 2D feature maps to 1D vectors.
-  - Dense Layers for classification (Output layer with Softmax activation).
-- **Classes:** 36 classes (10 digits + 26 alphabets).
+The trained network reaches about 96% accuracy on the training split and peaks around 90% validation accuracy across 10 epochs. It is a deliberately simple model (a fully-connected network, not a convolutional one), which keeps it small and fast but is also the main thing I'd change if I took it further.
 
-### Web Application
-The Streamlit app provides:
-- File uploader for images (JPG, JPEG, PNG).
-- Display of the uploaded image.
-- "Predict" button to trigger the inference.
-- Output display showing the predicted class and prediction confidence.
+## Key Features
 
----
+- Classifies hand signs into 36 ASL classes: digits `0`–`9` and letters `a`–`z`.
+- Streamlit web app with a file uploader (JPG / JPEG / PNG), an image preview, and a one-click Predict button.
+- Returns both the predicted character and a confidence percentage from the softmax output.
+- Self-contained training notebook that goes from raw image folders to a saved model, with each stage labelled (loading, visualisation, preprocessing, model build, training, plots, saving, inference).
+- Automatic class discovery — the app reads the dataset folder names and sorts them, so the label order always matches what the model was trained on.
+- Model and class loading are cached in Streamlit (`@st.cache_resource` / `@st.cache_data`) so the `.h5` file is only read once per session.
+- Training/validation accuracy and loss curves saved to `training_history.png` for a quick read on how the run went.
+- Sample prediction outputs included under `Output/` so you can see what the app produces without running it.
+
+## How It Works
+
+The pipeline is straightforward: a labelled image dataset goes through preprocessing into a Keras data generator, a small dense network is trained on it, the model is saved to disk, and the Streamlit app loads that model to score new uploads.
+
+### Dataset
+
+The data lives in `asl_dataset/`, organised as one subfolder per class. There are 36 folders (`0`–`9`, `a`–`z`), each holding cropped JPEG photos of a hand making that sign — roughly 70 images per class, 2,515 images in total. Because the folder name is the label, no separate annotation file is needed.
+
+### Preprocessing
+
+Preprocessing is handled by Keras' `ImageDataGenerator`:
+
+- `rescale=1./255` normalises pixel values from the 0–255 range down to 0–1.
+- `target_size=(64, 64)` resizes every image to 64×64 pixels.
+- `class_mode='categorical'` produces one-hot labels for the 36 classes.
+- `validation_split=0.2` carves the data into roughly 80/20 — about 2,013 images for training and 503 for validation — loaded with `flow_from_directory` at a batch size of 32.
+
+### Model
+
+The classifier is a fully-connected (dense) neural network built with the Keras Sequential API. The 64×64×3 image is flattened into a 12,288-value vector and pushed through three hidden layers and a softmax output:
+
+```
+Input(64, 64, 3)
+  → Flatten            (12,288)
+  → Dense(512, relu)
+  → Dense(256, relu)
+  → Dense(128, relu)
+  → Dense(36, softmax)
+```
+
+That comes to about 6.46 million trainable parameters (~24.6 MB). It is compiled with the Adam optimiser and `categorical_crossentropy` loss, tracking accuracy, and trained for 10 epochs.
+
+### Training and saving
+
+Training runs over the generator with the validation split monitored each epoch. Accuracy and loss for both train and validation are plotted side by side with matplotlib and exported as `training_history.png`. The trained model is then written to `asl_model.h5` in Keras' HDF5 format (the saved file is around 74 MB).
+
+### Inference (the app)
+
+`app.py` is the Streamlit front-end. On startup it loads `asl_model.h5` and reads the sorted class list from the dataset folder, both cached so they only load once. When you upload an image and hit Predict, it:
+
+1. Resizes the image to 64×64,
+2. Converts it to an array and divides by 255 to normalise,
+3. Adds a batch dimension and runs `model.predict`,
+4. Takes the `argmax` of the output as the predicted class and turns the matching softmax value into a confidence percentage,
+5. Shows the predicted character (uppercased) and the confidence.
+
+## Results / Highlights
+
+- 36-class classifier over digits 0–9 and letters a–z.
+- ~2,515 images, split 2,013 train / 503 validation (80/20).
+- Final epoch: ~95.7% training accuracy, ~87.7% validation accuracy; validation accuracy peaks near 90% (epoch 7).
+- Model: dense network, ~6.46M parameters, 64×64×3 input, trained 10 epochs with Adam.
+- A spot-check inference on a held-out `d` image predicts `d` correctly.
 
 ## Tech Stack
-- **Languages:** Python 3.x
-- **Frameworks:** TensorFlow, Keras
-- **Web Interface:** Streamlit
-- **Libraries:** NumPy, Pillow (PIL)
-- **Tools:** Jupyter Notebook
 
----
+- **Language:** Python 3
+- **Deep learning:** TensorFlow / Keras (`Sequential`, `Dense`, `ImageDataGenerator`)
+- **Web app:** Streamlit
+- **Data / imaging:** NumPy, Pillow (PIL)
+- **Notebook / plots:** Jupyter, matplotlib
 
 ## Getting Started
 
-### 1. Clone the repository
+### Prerequisites
+
+- Python 3.x
+- The trained model `asl_model.h5` and the `asl_dataset/` folder in the project root (both are in the repo; the app reads class names from the dataset folder).
+
+### Installation
+
 ```bash
 git clone https://github.com/DCode-v05/Hand-Sign-Detection.git
-cd "Hand Sign Language"
-```
-
-### 2. Install dependencies
-```bash
+cd Hand-Sign-Detection
 pip install -r requirements.txt
 ```
 
-### 3. Run the Application
-To launch the Streamlit app:
+`requirements.txt` pulls in `streamlit`, `tensorflow`, `numpy`, and `pillow`.
+
+### Running
+
+Launch the web app:
+
 ```bash
 streamlit run app.py
 ```
 
-To view the training process (Optional):
+To retrain or step through the training process yourself:
+
 ```bash
 jupyter notebook Hand_Sign_Prediction_SP.ipynb
 ```
 
----
+Note: the notebook paths point at a Google Drive location (it was written in Colab), so update the `asl_dataset` path to your local copy before running it.
 
 ## Usage
-1. Launch the app using `streamlit run app.py`.
-2. Click on "Browse files" to upload an image of a hand sign.
-3. Click the "Predict" button.
-4. View the predicted character and the model's confidence.
 
----
+1. Run `streamlit run app.py` and open the URL it prints.
+2. Use the uploader to select a hand-sign image (`.jpg`, `.jpeg`, or `.png`).
+3. The image previews at 300px wide; click **Predict**.
+4. You get the predicted ASL character and the model's confidence, e.g. `Predicted Class: D` with `Confidence: 97.42%`.
+
+The model expects a reasonably tight crop of a hand on a plain background, similar to the training images — that is what it was trained on.
 
 ## Project Structure
+
 ```
-Hand Sign Language/
-│
-├── app.py                         # Streamlit web application
-├── Hand_Sign_Prediction_SP.ipynb  # Model training and analysis notebook
-├── asl_model.h5                   # Trained model file
-├── requirements.txt               # Python dependencies
-├── training_history.png           # Training accuracy/loss plot
-├── asl_dataset/                   # Dataset directory (Images)
-├── Output/                        # Generated outputs (if any)
-└── README.md                      # Project documentation
+Hand-Sign-Detection/
+├── app.py                         # Streamlit app: upload an image, get a prediction + confidence
+├── Hand_Sign_Prediction_SP.ipynb  # Training notebook: load → preprocess → train → plot → save
+├── asl_model.h5                   # Trained Keras model (~74 MB, HDF5)
+├── requirements.txt               # streamlit, tensorflow, numpy, pillow
+├── training_history.png           # Train/validation accuracy & loss curves
+├── asl_dataset/                   # 36 class folders (0-9, a-z) of cropped hand images
+│   ├── 0/ … 9/
+│   └── a/ … z/
+├── Output/                        # Sample prediction screenshots
+└── README.md
 ```
-
----
-
-## Contributing
-
-Contributions are welcome! To contribute:
-1. Fork the repository
-2. Create a new branch:
-   ```bash
-   git checkout -b feature/your-feature
-   ```
-3. Commit your changes:
-   ```bash
-   git commit -m "Add your feature"
-   ```
-4. Push to your branch:
-   ```bash
-   git push origin feature/your-feature
-   ```
-5. Open a pull request describing your changes.
 
 ---
 
 ## Contact
-- **GitHub:** [DCode-v05](https://github.com/DCode-v05)
-- **Email:** denistanb05@gmail.com
+
+**Portfolio:** [Denistan](https://www.denistan.me)<br>
+**LinkedIn:** [Denistan](https://www.linkedin.com/in/denistanb)<br>
+**GitHub:** [DCode-v05](https://github.com/DCode-v05)<br>
+**LeetCode:** [Denistan_B](https://leetcode.com/u/Denistan_B)<br>
+**Email:** [denistanb05@gmail.com](mailto:denistanb05@gmail.com)
+
+Made with ❤️ by **Denistan B**
